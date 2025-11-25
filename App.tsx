@@ -84,37 +84,78 @@ const App: React.FC = () => {
     startY: number;
   }>({ active: false, mode: true, processed: new Set(), startX: 0, startY: 0 });
 
-  // 1. Initialize Peer
+  // 1. Initialize Peer (Robust Version)
   useEffect(() => {
+    let mounted = true;
+    let timeoutId: any;
+
     const initPeer = async () => {
       // Small delay to ensure script load
       await new Promise(r => setTimeout(r, 500));
+      
+      if (!mounted) return;
+
       if (!window.Peer) {
-        setConnStatus('错误: PeerJS 未加载');
+        setConnStatus('错误: PeerJS 库未加载 (请检查网络)');
         return;
       }
 
-      const peer = new window.Peer(null, { debug: 1 });
-      
-      peer.on('open', (id: string) => {
-        setPeerId(id);
-        peerRef.current = peer;
-        setConnStatus('就绪');
-      });
+      if (peerRef.current) {
+        // Already initialized
+        return;
+      }
 
-      peer.on('connection', (conn: any) => {
-        conn.on('data', (data: NetworkMessage) => handleData(data, conn.peer));
-        conn.on('open', () => {
-            connectionsRef.current.push(conn);
+      try {
+        console.log("Initializing PeerJS...");
+        const peer = new window.Peer(null, { debug: 1 });
+        
+        peer.on('open', (id: string) => {
+          if (!mounted) return;
+          console.log("Peer Open, ID:", id);
+          setPeerId(id);
+          peerRef.current = peer;
+          setConnStatus('就绪');
+          if (timeoutId) clearTimeout(timeoutId);
         });
-      });
-      
-      peer.on('error', (err: any) => {
-        console.error(err);
-        setConnStatus(`错误: ${err.type}`);
-      });
+
+        peer.on('connection', (conn: any) => {
+          if (!mounted) return;
+          console.log("Incoming connection from:", conn.peer);
+          conn.on('data', (data: NetworkMessage) => handleData(data, conn.peer));
+          conn.on('open', () => {
+              connectionsRef.current.push(conn);
+          });
+        });
+        
+        peer.on('error', (err: any) => {
+          console.error("PeerJS Error:", err);
+          if (!mounted) return;
+          setConnStatus(`网络错误: ${err.type || 'Unknown'}`);
+        });
+
+      } catch (err: any) {
+        console.error("PeerJS Constructor Error:", err);
+        setConnStatus("初始化失败: 请关闭浏览器的隐私/跟踪防护功能重试");
+      }
     };
+
     initPeer();
+
+    // Fallback timeout
+    timeoutId = setTimeout(() => {
+      if (!peerRef.current && mounted) {
+        setConnStatus("连接超时: 请检查浏览器设置或刷新页面");
+      }
+    }, 10000);
+
+    return () => {
+      mounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+      if (peerRef.current) {
+        peerRef.current.destroy();
+        peerRef.current = null;
+      }
+    };
   }, []);
 
   // 2. Broadcast State (Host Only)
@@ -172,7 +213,7 @@ const App: React.FC = () => {
   const createRoom = (dedicated: boolean) => {
     setIsHost(true);
     setIsDedicated(dedicated);
-    // Don't change connStatus here, keep it as '就绪' so the lobby renders
+    // Note: We don't change status away from '就绪' so the UI shows the lobby info
     
     // If NOT dedicated, Host is Player 1
     const initialPlayers = dedicated ? [] : [{
@@ -214,12 +255,19 @@ const App: React.FC = () => {
     const target = prompt("请输入房主ID:");
     if (!target) return;
     setTargetPeerId(target);
+    
+    if (!peerRef.current) {
+        alert("网络未就绪，请稍后再试");
+        return;
+    }
+
     const conn = peerRef.current.connect(target);
     conn.on('open', () => {
       setConnStatus('已连接房主');
       conn.send({ type: 'JOIN_REQUEST', name: playerName });
     });
     conn.on('data', (data: NetworkMessage) => handleData(data, target));
+    conn.on('error', (err: any) => alert("连接失败: " + err));
     // Keep reference to send actions
     connectionsRef.current = [conn];
   };
@@ -286,7 +334,7 @@ const App: React.FC = () => {
 
     let newBaseBid = gameState.baseBid;
     let newLandlordId = gameState.landlordId;
-    let nextPhase = GamePhase.Bidding;
+    // let nextPhase = GamePhase.Bidding;
     let nextTurn = (gameState.currentTurnIndex + 1) % 3;
 
     if (amount > newBaseBid) {
@@ -550,7 +598,7 @@ const App: React.FC = () => {
             </div>
 
             {connStatus !== '就绪' && connStatus !== '已连接房主' ? (
-               <div className="text-center text-yellow-300 animate-pulse">{connStatus}</div>
+               <div className="text-center text-yellow-300 animate-pulse bg-black/30 p-2 rounded">{connStatus}</div>
             ) : (
               <>
                 {!isHost && !targetPeerId ? (
