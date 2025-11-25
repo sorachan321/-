@@ -172,7 +172,7 @@ const App: React.FC = () => {
   const createRoom = (dedicated: boolean) => {
     setIsHost(true);
     setIsDedicated(dedicated);
-    setConnStatus('等待玩家加入...');
+    // Don't change connStatus here, keep it as '就绪' so the lobby renders
     
     // If NOT dedicated, Host is Player 1
     const initialPlayers = dedicated ? [] : [{
@@ -561,7 +561,9 @@ const App: React.FC = () => {
                    </div>
                 ) : (
                   <div className="text-center space-y-4">
-                    <div className="text-xl text-white font-bold">房间号 (ID)</div>
+                    <div className="text-xl text-white font-bold">
+                        {isDedicated ? '👑 专用房间 (观战模式)' : '房间号 (ID)'}
+                    </div>
                     <div className="text-2xl font-mono bg-black/40 p-3 rounded-lg select-all text-green-400 break-all">
                       {isHost ? peerId : targetPeerId}
                     </div>
@@ -588,6 +590,7 @@ const App: React.FC = () => {
                              {p.isBot && <span className="text-xs bg-gray-600 px-1 rounded">BOT</span>}
                            </div>
                          ))}
+                         {gameState.players.length === 0 && <div className="text-white/30 text-sm">等待加入...</div>}
                        </div>
                     </div>
 
